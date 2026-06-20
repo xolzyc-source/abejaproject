@@ -381,11 +381,12 @@
         </select>
         <label id="editFieldLabel">Nuevo valor</label>
         <input type="text" id="editValue" placeholder="Ej: 5">
+        <textarea id="editValueLineup" style="display:none; width:100%; min-height:160px; padding:10px; background:var(--negro); border:1px solid var(--linea); border-radius:8px; color:var(--texto); font-family:monospace; font-size:12px;" placeholder='{"teamA":[{"name":"Messi","pos":"DEL","rating":9.1}],"teamB":[{"name":"Ochoa","pos":"POR","rating":5.5}]}'></textarea>
         <div class="admin-actions">
           <button class="btn-cancel" id="closeEdit">Cerrar</button>
           <button class="btn-save" id="saveEdit">Guardar burla</button>
         </div>
-        <div class="admin-hint">Esto sobreescribe el dato real solo en esta página. Se guarda para todos los que la visiten.</div>
+        <div class="admin-hint" id="adminHintText">Esto sobreescribe el dato real solo en esta página. Se guarda para todos los que la visiten.</div>
       </div>
     </div>
   </div>
@@ -400,7 +401,7 @@
 
   const ADMIN_PASS = "912"; // cámbiala antes de publicar
 
-  // Mapa en memoria de ediciones cargadas desde Supabase: { "match:m1:scoreA": 7, ... }
+  // Mapa en memoria de ediciones cargadas desde Supabase: { "match:m1:scoreA": "7", "lineup:m1": "{...}" }
   let ediciones = {};
 
   async function cargarEdiciones(){
@@ -410,18 +411,21 @@
     (data || []).forEach(row => { ediciones[row.id] = row.valor; });
   }
 
-  async function guardarEdicion(id, valor){
+  async function guardarEdicionTexto(id, valor){
+    const valorTexto = String(valor);
     const { error } = await supabase
       .from('ediciones')
-      .upsert({ id, valor, actualizado_en: new Date().toISOString() });
+      .upsert({ id, valor: valorTexto, actualizado_en: new Date().toISOString() });
     if(error){ console.error('Error guardando edición en Supabase:', error); return false; }
-    ediciones[id] = valor;
+    ediciones[id] = valorTexto;
     return true;
   }
 
-  // Aplica cualquier edición guardada encima de un valor real que vino de la API
+  // Aplica cualquier edición numérica guardada encima de un valor real (ej: marcador, puntos, goles)
   function aplicarEdicion(id, valorReal){
-    return ediciones.hasOwnProperty(id) ? ediciones[id] : valorReal;
+    if(!ediciones.hasOwnProperty(id)) return valorReal;
+    const num = parseInt(ediciones[id], 10);
+    return isNaN(num) ? valorReal : num;
   }
 
   // =====================================================
@@ -430,7 +434,6 @@
   let matches = [];
   let groups = [];
   let scorers = [];
-  let lineups = {}; // se llena al abrir el modal de un partido específico
 
   async function cargarFixtures(){
     try{
@@ -438,20 +441,17 @@
       const json = await res.json();
       const data = json.response || [];
 
-      matches = data.map(f => {
-        const id = String(f.fixture.id);
-        const scoreA = f.goals.home ?? 0;
-        const scoreB = f.goals.away ?? 0;
-        return {
-          id,
-          teamA: f.teams.home.name,
-          teamB: f.teams.away.name,
-          scoreA: aplicarEdicion(`match:${id}:scoreA`, scoreA),
-          scoreB: aplicarEdicion(`match:${id}:scoreB`, scoreB),
-          status: f.fixture.status.long,
-          minute: f.fixture.status.elapsed ? `${f.fixture.status.elapsed}'` : '--',
-        };
-      });
+      // Mostramos los partidos más recientes primero, máximo 12 en la vista principal
+      matches = data.slice(-12).reverse().map(f => ({
+        id: f.id,
+        teamA: f.teamA,
+        teamB: f.teamB,
+        scoreA: aplicarEdicion(`match:${f.id}:scoreA`, f.scoreA),
+        scoreB: aplicarEdicion(`match:${f.id}:scoreB`, f.scoreB),
+        status: f.status,
+        minute: f.minute,
+        group: f.group,
+      }));
     } catch(err){
       console.error('Error cargando fixtures:', err);
       matches = [];
@@ -462,17 +462,18 @@
     try{
       const res = await fetch('/api/partidos?tipo=standings');
       const json = await res.json();
-      const tabla = json.response?.[0]?.league?.standings?.[0] || [];
+      const data = json.response || [];
 
-      groups = tabla.map(row => ({
-        team: row.team.name,
-        pj: row.all.played,
-        g: row.all.win,
-        e: row.all.draw,
-        p: row.all.lose,
-        gf: row.all.goals.for,
-        gc: row.all.goals.against,
-        pts: aplicarEdicion(`group:${row.team.name}:pts`, row.points),
+      groups = data.map(row => ({
+        team: row.team,
+        group: row.group,
+        pj: row.pj,
+        g: row.g,
+        e: row.e,
+        p: row.p,
+        gf: row.gf,
+        gc: row.gc,
+        pts: aplicarEdicion(`group:${row.team}:pts`, row.pts),
       }));
     } catch(err){
       console.error('Error cargando standings:', err);
@@ -487,9 +488,9 @@
       const data = json.response || [];
 
       scorers = data.slice(0, 10).map(p => ({
-        name: p.player.name,
-        team: p.statistics[0]?.team?.name || '',
-        goals: aplicarEdicion(`scorer:${p.player.name}:goals`, p.statistics[0]?.goals?.total || 0),
+        name: p.name,
+        team: p.team,
+        goals: aplicarEdicion(`scorer:${p.name}:goals`, p.goals),
       }));
     } catch(err){
       console.error('Error cargando goleadores:', err);
@@ -497,34 +498,16 @@
     }
   }
 
-  // Carga alineación + calificaciones de un partido específico (al abrir el modal)
-  async function cargarLineupDePartido(fixtureId){
-    if(lineups[fixtureId]) return lineups[fixtureId]; // ya está en caché
-
+  // Alineación + calificaciones: 100% manual, vía el panel admin.
+  // Se guardan en Supabase con ids tipo "lineup:<matchId>" (texto libre con los 22 jugadores)
+  // y "rating:<matchId>:<jugador>" para cada calificación individual.
+  function obtenerLineupDePartido(matchId){
+    const guardado = ediciones[`lineup:${matchId}`];
+    if(!guardado) return null;
     try{
-      const res = await fetch(`/api/partidos?tipo=playerratings&fixture=${fixtureId}`);
-      const json = await res.json();
-      const data = json.response || [];
-      if(data.length < 2) return null;
-
-      const armarEquipo = (equipoData) => (equipoData.players || []).map(p => ({
-        name: p.player.name,
-        pos: p.statistics[0]?.games?.position || '-',
-        rating: aplicarEdicion(
-          `rating:${fixtureId}:${p.player.id}`,
-          parseFloat(p.statistics[0]?.games?.rating) || 6.0
-        ),
-        playerId: p.player.id,
-      }));
-
-      const resultado = {
-        teamA: armarEquipo(data[0]),
-        teamB: armarEquipo(data[1]),
-      };
-      lineups[fixtureId] = resultado;
-      return resultado;
+      return JSON.parse(guardado);
     } catch(err){
-      console.error('Error cargando alineación:', err);
+      console.error('Lineup guardado con formato inválido:', err);
       return null;
     }
   }
@@ -591,7 +574,7 @@
       `).join('');
   }
 
-  async function openMatchModal(matchId){
+  function openMatchModal(matchId){
     const m = matches.find(x => x.id === matchId);
     if(!m) return;
 
@@ -602,12 +585,9 @@
     `;
 
     const lineupsEl = document.getElementById('modalLineups');
-    lineupsEl.innerHTML = `<p style="color:var(--texto-mute); font-size:13px;">Cargando alineación...</p>`;
-    document.getElementById('matchModal').classList.add('open');
-
-    const data = await cargarLineupDePartido(matchId);
+    const data = obtenerLineupDePartido(matchId);
     if(!data){
-      lineupsEl.innerHTML = `<p style="color:var(--texto-mute); font-size:13px;">Todavía no hay alineación ni calificaciones disponibles para este partido.</p>`;
+      lineupsEl.innerHTML = `<p style="color:var(--texto-mute); font-size:13px;">Todavía no se cargó la alineación ni calificaciones de este partido. Puedes agregarlas desde el panel 🍯.</p>`;
     } else {
       lineupsEl.innerHTML = `
         <div class="lineup-col">
@@ -620,6 +600,8 @@
         </div>
       `;
     }
+
+    document.getElementById('matchModal').classList.add('open');
   }
 
   document.getElementById('closeMatchModal').addEventListener('click', () => {
@@ -717,6 +699,7 @@
     matches.forEach(m => {
       addOption(`match:${m.id}:scoreA`, `${m.teamA} (marcador) — actual: ${m.scoreA}`);
       addOption(`match:${m.id}:scoreB`, `${m.teamB} (marcador) — actual: ${m.scoreB}`);
+      addOption(`lineup:${m.id}`, `${m.teamA} vs ${m.teamB} — Alineación + ratings completos`);
     });
     groups.forEach(g => {
       addOption(`group:${g.team}:pts`, `${g.team} (puntos) — actual: ${g.pts}`);
@@ -724,12 +707,7 @@
     scorers.forEach(s => {
       addOption(`scorer:${s.name}:goals`, `${s.name} (goles) — actual: ${s.goals}`);
     });
-    // Calificaciones de jugadores: solo de partidos cuya alineación ya se cargó (al abrir su modal)
-    Object.entries(lineups).forEach(([fixtureId, data]) => {
-      [...data.teamA, ...data.teamB].forEach(p => {
-        addOption(`rating:${fixtureId}:${p.playerId}`, `${p.name} (rating) — actual: ${p.rating}`);
-      });
-    });
+    toggleEditInputMode();
   }
 
   function addOption(value, label){
@@ -739,15 +717,44 @@
     editTarget.appendChild(opt);
   }
 
-  document.getElementById('saveEdit').addEventListener('click', async () => {
-    const id = editTarget.value; // ej: "match:1234:scoreA" o "rating:1234:567"
-    const rawVal = document.getElementById('editValue').value;
-    const newVal = id.startsWith('rating:') ? parseFloat(rawVal) : parseInt(rawVal, 10);
-    if(isNaN(newVal)) return;
+  function toggleEditInputMode(){
+    const esLineup = editTarget.value.startsWith('lineup:');
+    document.getElementById('editValue').style.display = esLineup ? 'none' : 'block';
+    document.getElementById('editValueLineup').style.display = esLineup ? 'block' : 'none';
+    document.getElementById('editFieldLabel').textContent = esLineup
+      ? 'Alineación completa (formato JSON)'
+      : 'Nuevo valor';
 
-    const ok = await guardarEdicion(id, newVal);
+    if(esLineup){
+      const existente = ediciones[editTarget.value];
+      document.getElementById('editValueLineup').value = existente || '';
+    }
+  }
+
+  editTarget.addEventListener('change', toggleEditInputMode);
+
+  document.getElementById('saveEdit').addEventListener('click', async () => {
+    const id = editTarget.value; // ej: "match:abc:scoreA", "group:Mexico:pts", "lineup:abc"
+    let newVal;
+
+    if(id.startsWith('lineup:')){
+      const raw = document.getElementById('editValueLineup').value.trim();
+      try{
+        JSON.parse(raw); // solo validamos que sea JSON correcto antes de guardar
+      } catch(err){
+        document.getElementById('adminHintText').textContent = 'El JSON de la alineación no es válido. Revisa el formato.';
+        return;
+      }
+      newVal = raw; // guardamos como texto, se parsea al leer
+    } else {
+      const rawVal = document.getElementById('editValue').value;
+      newVal = parseInt(rawVal, 10);
+      if(isNaN(newVal)) return;
+    }
+
+    const ok = await guardarEdicionTexto(id, newVal);
     if(!ok){
-      document.querySelector('.admin-hint').textContent = 'No se pudo guardar en Supabase. Revisa la consola.';
+      document.getElementById('adminHintText').textContent = 'No se pudo guardar en Supabase. Revisa la consola.';
       return;
     }
 
