@@ -397,7 +397,7 @@
   // =====================================================
   const SUPABASE_URL = "https://kagabzclesspsmsosyze.supabase.co";
   const SUPABASE_ANON_KEY = "sb_publishable_vyMY6wnN3k5byzo1_DAYpw_pPShdhI6";
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const ADMIN_PASS = "912"; // cámbiala antes de publicar
 
@@ -405,7 +405,7 @@
   let ediciones = {};
 
   async function cargarEdiciones(){
-    const { data, error } = await supabase.from('ediciones').select('id, valor');
+    const { data, error } = await db.from('ediciones').select('id, valor');
     if(error){ console.error('Error cargando ediciones de Supabase:', error); return; }
     ediciones = {};
     (data || []).forEach(row => { ediciones[row.id] = row.valor; });
@@ -413,7 +413,7 @@
 
   async function guardarEdicionTexto(id, valor){
     const valorTexto = String(valor);
-    const { error } = await supabase
+    const { error } = await db
       .from('ediciones')
       .upsert({ id, valor: valorTexto, actualizado_en: new Date().toISOString() });
     if(error){ console.error('Error guardando edición en Supabase:', error); return false; }
