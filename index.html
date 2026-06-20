@@ -373,7 +373,7 @@
           <button class="btn-cancel" id="cancelLogin">Cancelar</button>
           <button class="btn-save" id="submitLogin">Entrar</button>
         </div>
-        <div class="admin-hint">Clave por defecto: <strong>912</strong> (cámbiala en el código antes de publicar)</div>
+        <div class="admin-hint">Acceso solo para administración del sitio.</div>
       </div>
       <div id="editView" style="display:none;">
         <label>¿Qué quieres editar?</label>
@@ -398,8 +398,6 @@
   const SUPABASE_URL = "https://kagabzclesspsmsosyze.supabase.co";
   const SUPABASE_ANON_KEY = "sb_publishable_vyMY6wnN3k5byzo1_DAYpw_pPShdhI6";
   const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  const ADMIN_PASS = "912"; // cámbiala antes de publicar
 
   // Mapa en memoria de ediciones cargadas desde Supabase: { "match:m1:scoreA": "7", "lineup:m1": "{...}" }
   let ediciones = {};
@@ -681,16 +679,35 @@
   document.getElementById('cancelLogin').addEventListener('click', () => adminModal.classList.remove('open'));
   document.getElementById('closeEdit').addEventListener('click', () => adminModal.classList.remove('open'));
 
-  document.getElementById('submitLogin').addEventListener('click', () => {
+  document.getElementById('submitLogin').addEventListener('click', async () => {
     const val = document.getElementById('adminPass').value;
-    if(val === ADMIN_PASS){
-      loginView.style.display = 'none';
-      editView.style.display = 'block';
-      populateEditOptions();
-    } else {
-      document.getElementById('adminPass').style.borderColor = 'var(--rojo)';
-      document.getElementById('adminPass').value = '';
-      document.getElementById('adminPass').placeholder = 'Clave incorrecta';
+    const submitBtn = document.getElementById('submitLogin');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verificando...';
+
+    try{
+      const res = await fetch('/.netlify/functions/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clave: val }),
+      });
+      const json = await res.json();
+
+      if(json.ok){
+        loginView.style.display = 'none';
+        editView.style.display = 'block';
+        populateEditOptions();
+      } else {
+        document.getElementById('adminPass').style.borderColor = 'var(--rojo)';
+        document.getElementById('adminPass').value = '';
+        document.getElementById('adminPass').placeholder = 'Clave incorrecta';
+      }
+    } catch(err){
+      console.error('Error verificando clave:', err);
+      document.getElementById('adminPass').placeholder = 'Error de conexión';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Entrar';
     }
   });
 
