@@ -45,6 +45,26 @@
   }
   .brand{ display:flex; align-items:center; gap:10px; }
   .brand .bee{ font-size: 26px; filter: drop-shadow(0 0 6px rgba(255,198,43,.6)); }
+  .logo-img{ height: 36px; width: auto; border-radius: 8px; object-fit: cover; }
+
+  /* ---------- IMÁGENES LATERALES (memes/edits) ---------- */
+  .side-deco{
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 160px;
+    max-height: 70vh;
+    object-fit: contain;
+    z-index: 5;
+    opacity: 0.9;
+    pointer-events: none;
+  }
+  .side-deco-left{ left: 12px; }
+  .side-deco-right{ right: 12px; }
+
+  @media (max-width: 1200px){
+    .side-deco{ display: none; } /* en pantallas chicas estorbarían el contenido */
+  }
   .brand h1{
     font-family:'Archivo Black', sans-serif;
     font-size: 20px; margin:0; letter-spacing: 0.5px;
@@ -301,7 +321,8 @@
 
   <div class="hive-bar">
     <div class="brand">
-      <span class="bee">🐝</span>
+      <img src="imagenes/logo.png" alt="La Abeja 912" class="logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+      <span class="bee" style="display:none;">🐝</span>
       <div>
         <h1>LA ABEJA 912</h1>
         <span>STATS NO OFICIALES DEL MUNDIAL</span>
@@ -312,6 +333,9 @@
     </div>
     <div class="live-pill"><span class="live-dot"></span> EN VIVO</div>
   </div>
+
+  <img src="imagenes/lateral-izquierda.png" alt="" class="side-deco side-deco-left" onerror="this.style.display='none';">
+  <img src="imagenes/lateral-derecha.png" alt="" class="side-deco side-deco-right" onerror="this.style.display='none';">
 
   <section class="hero">
     <h2>EL PANAL DE <span class="hl">DATOS</span><br>DEL MUNDIAL</h2>
